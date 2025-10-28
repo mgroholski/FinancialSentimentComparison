@@ -7,9 +7,9 @@ import zipfile
 import shutil
 
 
-# 反推相对时间
+# Reverse relative time
 def convert_to_utc(time_str):
-    # 检查并去除时区缩写
+    # Check and remove time zone abbreviations
     if " EDT" in time_str:
         time_str_cleaned = time_str.replace(" EDT", "")
         offset = timedelta(hours=-4)
@@ -17,11 +17,11 @@ def convert_to_utc(time_str):
         time_str_cleaned = time_str.replace(" EST", "")
         offset = timedelta(hours=-5)
     else:
-        # 默认为0时差，对于只有日期的情况不调整时区
+        # The default is 0 time difference, and the time zone is not adjusted for only the date.
         offset = timedelta(hours=0)
         time_str_cleaned = time_str
 
-    # 尝试不同的日期时间格式
+    # Try different date and time formats
     formats = [
         "%B %d, %Y — %I:%M %p",  # "September 12, 2023 — 06:15 pm"
         "%b %d, %Y %I:%M%p",  # "Nov 14, 2023 7:35AM"
@@ -33,20 +33,20 @@ def convert_to_utc(time_str):
 
     for fmt in formats:
         try:
-            # 尝试解析日期和时间
+            # Try parsing date and time
             dt = datetime.strptime(time_str_cleaned, fmt)
-            # 如果格式只包含日期，不包含具体时间，则不应用时区调整
+            # If the format contains only a date without a specific time, no time zone adjustment is applied.
             if fmt == "%d-%b-%y":
                 offset = timedelta(hours=0)
 
-            # 调整为UTC时间
+            # Adjust to UTC time
             dt_utc = dt + offset
 
             return dt_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
         except ValueError:
             continue
 
-    # 如果所有格式都不匹配，返回错误信息
+    # If none of the formats match, an error message is returned.
     return "Invalid date format"
 
 
@@ -55,57 +55,27 @@ def date_inte(folder_path, saving_path):
     for csv_file in csv_files:
         print("Starting: " + csv_file)
         file_path = os.path.join(folder_path, csv_file)
-        # 使用pandas的read_csv函数读取CSV文件
+        # Reading CSV files using the read_csv function of pandas
         df = pd.read_csv(file_path, on_bad_lines="warn")
         df.columns = df.columns.str.capitalize()
         if "Datetime" in df.columns:
             df.rename(columns={"Datetime": "Date"}, inplace=True)
-        # 应用转换函数
+        # Apply the conversion function
         print(df["Date"])
         df["Date"] = df["Date"].apply(convert_to_utc)
         print(df["Date"])
-        # # 将Date列转换为日期时间格式
+        # Convert the Date column to datetime format
         df["Date"] = pd.to_datetime(df["Date"], utc=True)
-        # 按照Date列降序排序
+        # Sort by Date column in descending order
         df = df.sort_values(by="Date", ascending=False)
-        # 输出结果
+        # Output
         print(df)
 
         df.to_csv(os.path.join(saving_path, csv_file), index=False)
         print("Done: " + csv_file)
 
 
-def download_fnspid_files():
-    repo_id = "Zihan1004/FNSPID"
-
-    news_dir = "./news_data_raw"
-    stock_dir = "./stock_price_data_raw"
-
-    os.makedirs(news_dir, exist_ok=True)
-    os.makedirs(stock_dir, exist_ok=True)
-
-    print("Downloading stock_news/All_external.csv ...")
-    news_path = hf_hub_download(
-        repo_id=repo_id, filename="Stock_news/All_external.csv", repo_type="dataset"
-    )
-
-    shutil.copy2(news_path, os.path.join(news_dir, "All_external.csv"))
-    print(f"Saved news data to {news_dir}/All_external.csv")
-
-    print("Downloading Stock_price/full_history.zip ...")
-    zip_path = hf_hub_download(
-        repo_id=repo_id, filename="Stock_price/full_history.zip", repo_type="dataset"
-    )
-
-    with zipfile.ZipFile(zip_path, "r") as zip_ref:
-        zip_ref.extractall(stock_dir)
-
-    print(f"Extracted stock price data to {stock_dir}")
-
-
 if __name__ == "__main__":
-    download_fnspid_files()
-
     news_folder_path = "news_data_raw"
     news_saving_path = "news_data_preprocessed"
 
