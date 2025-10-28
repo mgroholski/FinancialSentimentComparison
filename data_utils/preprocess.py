@@ -4,6 +4,7 @@ from datetime import datetime
 import pandas as pd
 from huggingface_hub import hf_hub_download
 import zipfile
+import shutil
 
 
 # 反推相对时间
@@ -88,7 +89,7 @@ def download_fnspid_files():
         repo_id=repo_id, filename="Stock_news/All_external.csv", repo_type="dataset"
     )
 
-    os.rename(news_path, os.path.join(news_dir, "All_external.csv"))
+    shutil.copy2(news_path, os.path.join(news_dir, "All_external.csv"))
     print(f"Saved news data to {news_dir}/All_external.csv")
 
     print("Downloading Stock_price/full_history.zip ...")
