@@ -2,5 +2,8 @@ class CNN:
     def __init__(self):
         pass
 
-    def run(self):
+    def train(self, train_data, val_data):
+        pass
+
+    def predict(self, eval_data):
         pass
