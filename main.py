@@ -51,7 +51,7 @@ def parse_args():
         "-p",
         "--pipeline",
         required=True,
-        choices=["svm", "cnn", "lstm", "forest", "all"],
+        choices=["svm", "cnn", "lstm", "randomforest", "all"],
         help="Select which pipeline to run.",
     )
 

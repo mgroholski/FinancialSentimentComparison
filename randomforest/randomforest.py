@@ -1,194 +1,248 @@
+from typing import Optional
 import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-import joblib
-from transformers import pipeline
+from sklearn.metrics import precision_score, recall_score, f1_score
 from sentence_transformers import SentenceTransformer
 
 
 class RandomForest:
+    """
+    Binary (0/1) text classifier using SentenceTransformer embeddings + RandomForestClassifier.
+    Expects dataframes with columns: 'Summary' (str), 'Truth' (0 or 1).
+    """
+
     def __init__(
-        self, data_folder="../data_processor/price_news_integrate", save_model=True
+        self,
+        model_name: str = "all-MiniLM-L6-v2",
+        n_estimators: int = 100,
+        max_depth: Optional[int] = None,
+        random_state: int = 42,
+        trees_per_epoch: int = 10,
     ):
         """
-        Random Forest model combining FinBERT sentiment + MiniLM semantic embeddings.
-        Used for predicting next-day stock trend based on price and news summaries.
+        Initialize the RandomForest classifier with SentenceTransformer embeddings.
+        
+        Args:
+            model_name: Name of the SentenceTransformer model for text embeddings
+            n_estimators: Number of trees in the forest
+            max_depth: Maximum depth of each tree (None means unlimited)
+            random_state: Random seed for reproducibility
+            trees_per_epoch: Number of trees to add per "epoch" for incremental training
         """
-        self.data_folder = data_folder
-        self.save_model = save_model
-        self.model = None
-        self.df = None
-        self.price_features = [
-            "Open",
-            "High",
-            "Low",
-            "Close",
-            "Adj_Close",
-            "Volume",
-            "News_flag",
-        ]
+        self.encoder = SentenceTransformer(model_name)
+        self.n_estimators = n_estimators
+        self.max_depth = max_depth
+        self.random_state = random_state
+        self.trees_per_epoch = trees_per_epoch
+        self.model = None  # Will be initialized during training
+        self._is_fitted = False
+        self.training_history = {
+            "epoch": [],
+            "precision": [],
+            "recall": [],
+            "f1": [],
+        }
 
-        print("Loading FinBERT...")
-        self.finbert = pipeline("sentiment-analysis", model="yiyanghkust/finbert-tone")
+    @staticmethod
+    def _ensure_binary(y: pd.Series) -> np.ndarray:
+        """Validate that labels are binary (0/1)."""
+        y_arr = y.astype(int).to_numpy()
+        uniq = set(np.unique(y_arr).tolist())
+        if not uniq.issubset({0, 1}):
+            raise ValueError(
+                f"'Truth' must be binary 0/1. Found labels: {sorted(uniq)}"
+            )
+        return y_arr
 
-        print("Loading MiniLM...")
-        self.minilm = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-
-        print("Models loaded successfully")
-
-    # ---------- FinBERT ----------
-    def finbert_sentiment(self, text):
-        """Convert text into sentiment score (-1 to +1) using FinBERT."""
-        if not isinstance(text, str) or not text.strip():
-            return 0.0
-        try:
-            res = self.finbert(text[:512])[0]
-            label, score = res["label"].lower(), res["score"]
-            if label == "positive":
-                return score
-            elif label == "negative":
-                return -score
-            else:
-                return 0.0
-        except Exception:
-            return 0.0
-
-    # ---------- Data Loader ----------
-    def load_data(self, symbol):
-        """Load and preprocess data."""
-        file_path = os.path.join(self.data_folder, f"{symbol.upper()}.csv")
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
-
-        df = pd.read_csv(file_path)
-        df.columns = [c.strip().replace(" ", "_") for c in df.columns]
-        df.columns = [c.replace("Adj_close", "Adj_Close") for c in df.columns]
-        df = df.sort_values("Date").reset_index(drop=True)
-
-        # Create target label (tomorrow’s price movement)
-        df["Return"] = df["Close"].pct_change().shift(-1)
-        df["Target"] = (df["Return"] > 0).astype(int)
-
-        # Fill missing summaries
-        if "Lexrank_summary" not in df.columns:
-            df["Lexrank_summary"] = ""
-        df["Lexrank_summary"] = df["Lexrank_summary"].fillna("")
-
-        # Run FinBERT sentiment
-        print("→ Running FinBERT sentiment analysis...")
-        df["Sentiment_finbert"] = df["Lexrank_summary"].apply(self.finbert_sentiment)
-        df["Scaled_sentiment"] = (df["Sentiment_finbert"] + 1) / 2
-
-        df = df.dropna(subset=self.price_features + ["Target"])
-        self.df = df
-        print(f"Loaded {symbol.upper()} | {len(df)} rows")
-        return df
-
-    # ---------- Feature Preparation ----------
-    def prepare_features(self):
-        """Combine FinBERT sentiment, MiniLM embeddings, and price data."""
-        if "Lexrank_summary" not in self.df.columns:
-            raise ValueError("Missing Lexrank_summary column for text input")
-
-        print("→ Generating MiniLM embeddings...")
-        embeddings = np.vstack(
-            self.df["Lexrank_summary"].apply(self.minilm.encode).values
-        )
-        embed_df = pd.DataFrame(
-            embeddings, columns=[f"embed_{i}" for i in range(embeddings.shape[1])]
+    def _embed(self, texts: pd.Series) -> np.ndarray:
+        """Convert text summaries to dense embeddings."""
+        # normalize_embeddings=True helps with consistent feature scales
+        return self.encoder.encode(
+            texts.astype(str).tolist(),
+            show_progress_bar=False,
+            normalize_embeddings=True,
         )
 
-        # Scale numeric features
-        scaler = StandardScaler()
-        scaled_numeric = scaler.fit_transform(
-            self.df[self.price_features + ["Scaled_sentiment"]]
+    def train(
+        self, train_df: pd.DataFrame, val_df: Optional[pd.DataFrame] = None
+    ) -> None:
+        """
+        Train the RandomForest classifier incrementally and track validation performance.
+        
+        Args:
+            train_df: Training DataFrame with 'Summary' and 'Truth' columns
+            val_df: Optional validation DataFrame for monitoring (not used in training)
+        """
+        if "Summary" not in train_df or "Truth" not in train_df:
+            raise KeyError("train_df must contain 'Summary' and 'Truth' columns.")
+
+        if len(train_df) == 0:
+            raise ValueError("Training dataframe is empty.")
+
+        print(f"Training RandomForest on {len(train_df)} samples...")
+        
+        # Embed training data once
+        X_train = self._embed(train_df["Summary"])
+        y_train = self._ensure_binary(train_df["Truth"])
+        
+        # Embed validation data if provided
+        if val_df is not None:
+            if "Summary" not in val_df or "Truth" not in val_df:
+                raise KeyError("val_df must contain 'Summary' and 'Truth' columns.")
+            X_val = self._embed(val_df["Summary"])
+            y_val = self._ensure_binary(val_df["Truth"])
+            print(f"Validation set: {len(val_df)} samples")
+        
+        # Calculate number of epochs
+        n_epochs = max(1, self.n_estimators // self.trees_per_epoch)
+        
+        # Train incrementally
+        for epoch in range(1, n_epochs + 1):
+            n_trees = min(epoch * self.trees_per_epoch, self.n_estimators)
+            
+            # Initialize or update model
+            self.model = RandomForestClassifier(
+                n_estimators=n_trees,
+                max_depth=self.max_depth,
+                random_state=self.random_state,
+                n_jobs=-1,
+                class_weight="balanced",
+                warm_start=False,  # Train fresh each time for consistency
+            )
+            
+            self.model.fit(X_train, y_train)
+            
+            # Evaluate on validation set if provided
+            if val_df is not None:
+                y_pred = self.model.predict(X_val)
+                
+                precision = precision_score(y_val, y_pred, zero_division=0)
+                recall = recall_score(y_val, y_pred, zero_division=0)
+                f1 = f1_score(y_val, y_pred, zero_division=0)
+                
+                self.training_history["epoch"].append(epoch)
+                self.training_history["precision"].append(precision)
+                self.training_history["recall"].append(recall)
+                self.training_history["f1"].append(f1)
+                
+                print(f"Epoch {epoch}/{n_epochs} ({n_trees} trees) - "
+                      f"Val Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
+        
+        self._is_fitted = True
+        print("RandomForest training complete.")
+        
+        # Save training graph if validation was used
+        if val_df is not None and len(self.training_history["epoch"]) > 0:
+            self._save_training_graph()
+
+    def predict(self, eval_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Generate predictions for the evaluation dataset.
+        
+        Args:
+            eval_df: DataFrame with 'Summary' and 'Truth' columns
+            
+        Returns:
+            DataFrame with 'Prediction' and 'Truth' columns
+        """
+        if not self._is_fitted:
+            raise RuntimeError("Model is not fitted. Call train() first.")
+        
+        if "Summary" not in eval_df or "Truth" not in eval_df:
+            raise KeyError("eval_df must contain 'Summary' and 'Truth' columns.")
+
+        if len(eval_df) == 0:
+            raise ValueError("Evaluation dataframe is empty.")
+
+        X = self._embed(eval_df["Summary"])
+        preds = self.model.predict(X)
+
+        # Ground truth (validated as 0/1)
+        y_true = self._ensure_binary(eval_df["Truth"])
+
+        return pd.DataFrame(
+            {
+                "Prediction": preds.astype(int),
+                "Truth": y_true.astype(int),
+            },
+            index=eval_df.index,
         )
-        numeric_df = pd.DataFrame(
-            scaled_numeric, columns=self.price_features + ["Scaled_sentiment"]
-        )
 
-        X = pd.concat(
-            [numeric_df.reset_index(drop=True), embed_df.reset_index(drop=True)], axis=1
-        )
-        y = self.df["Target"].reset_index(drop=True)
+    def predict_proba(self, eval_df: pd.DataFrame) -> np.ndarray:
+        """
+        Get prediction probabilities for each class.
+        
+        Args:
+            eval_df: DataFrame with 'Summary' column
+            
+        Returns:
+            Array of shape (n_samples, 2) with probabilities for [class_0, class_1]
+        """
+        if not self._is_fitted:
+            raise RuntimeError("Model is not fitted. Call train() first.")
+        
+        if "Summary" not in eval_df:
+            raise KeyError("eval_df must contain 'Summary' column.")
 
-        self.X, self.y = X, y
-        print(f"Feature matrix shape: {X.shape}")
-        return X, y
+        X = self._embed(eval_df["Summary"])
+        return self.model.predict_proba(X)
 
-    # ---------- Model Training ----------
-    def train(self, test_size=0.2):
-        """Train Random Forest with dual sentiment-semantic features."""
-        X, y = self.prepare_features()
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, shuffle=False
-        )
+    def get_feature_importance(self) -> np.ndarray:
+        """
+        Get feature importance scores from the trained model.
+        
+        Returns:
+            Array of feature importance scores (one per embedding dimension)
+        """
+        if not self._is_fitted:
+            raise RuntimeError("Model is not fitted. Call train() first.")
+        
+        return self.model.feature_importances_
 
-        self.model = RandomForestClassifier(n_estimators=300, random_state=42)
-        self.model.fit(X_train, y_train)
-
-        y_pred = self.model.predict(X_test)
-        acc = accuracy_score(y_test, y_pred)
-
-        print(f"\nModel accuracy: {acc:.3f}")
-        print(classification_report(y_test, y_pred))
-
-        if self.save_model:
-            model_name = f"rf_dual_sentiment_{int(acc * 100)}.pkl"
-            joblib.dump(self.model, model_name)
-            print(f"Model saved as: {model_name}")
-
-        self.X_test, self.y_test, self.y_pred = X_test, y_test, y_pred
-
-    # ---------- Visualization ----------
-    def visualize(self, symbol="STOCK"):
-        """Plot predictions, confusion matrix, and feature importance."""
-        if self.model is None:
-            raise ValueError("No trained model to visualize.")
-
-        # Actual vs Predicted
-        plt.figure(figsize=(12, 5))
-        plt.plot(self.y_test.values, label="Actual", color="blue")
-        plt.plot(self.y_pred, label="Predicted", color="orange", alpha=0.7)
-        plt.title(f"Actual vs Predicted Trend - {symbol.upper()}")
-        plt.xlabel("Samples")
-        plt.ylabel("Trend (1=Up, 0=Down)")
-        plt.legend()
-        plt.grid(True)
-        plt.show()
-
-        # Confusion Matrix
-        cm = confusion_matrix(self.y_test, self.y_pred)
-        plt.figure(figsize=(5, 4))
-        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False)
-        plt.title(f"Confusion Matrix - {symbol.upper()}")
-        plt.xlabel("Predicted")
-        plt.ylabel("Actual")
-        plt.show()
-
-        # Feature Importance
-        importances = self.model.feature_importances_
-        indices = np.argsort(importances)[::-1][:15]
-        plt.figure(figsize=(8, 5))
-        sns.barplot(
-            x=importances[indices],
-            y=np.array(self.X.columns)[indices],
-            palette="viridis",
-        )
-        plt.title("Top 15 Feature Importances (FinBERT + MiniLM)")
-        plt.xlabel("Importance")
-        plt.ylabel("Feature")
-        plt.show()
-
-    # ---------- Full Pipeline ----------
-    def run(self, symbol=""):
-        """Execute the full pipeline."""
-        self.load_data(symbol)
-        self.train()
-        self.visualize(symbol)
+    def _save_training_graph(self) -> None:
+        """
+        Save training history graph showing validation metrics per epoch.
+        Graph is saved to ./output/randomforest/training_history.png
+        """
+        output_dir = os.path.join("output", "randomforest")
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, "training_history.png")
+        
+        # Create figure with 3 subplots
+        fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+        fig.suptitle("RandomForest Training: Validation Performance per Epoch", fontsize=14, fontweight="bold")
+        
+        epochs = self.training_history["epoch"]
+        
+        # Precision plot
+        axes[0].plot(epochs, self.training_history["precision"], marker='o', linewidth=2, color='#2E86AB')
+        axes[0].set_xlabel("Epoch", fontsize=11)
+        axes[0].set_ylabel("Precision", fontsize=11)
+        axes[0].set_title("Validation Precision", fontsize=12, fontweight="bold")
+        axes[0].grid(True, alpha=0.3)
+        axes[0].set_ylim([0, 1.05])
+        
+        # Recall plot
+        axes[1].plot(epochs, self.training_history["recall"], marker='s', linewidth=2, color='#A23B72')
+        axes[1].set_xlabel("Epoch", fontsize=11)
+        axes[1].set_ylabel("Recall", fontsize=11)
+        axes[1].set_title("Validation Recall", fontsize=12, fontweight="bold")
+        axes[1].grid(True, alpha=0.3)
+        axes[1].set_ylim([0, 1.05])
+        
+        # F1 Score plot
+        axes[2].plot(epochs, self.training_history["f1"], marker='^', linewidth=2, color='#F18F01')
+        axes[2].set_xlabel("Epoch", fontsize=11)
+        axes[2].set_ylabel("F1 Score", fontsize=11)
+        axes[2].set_title("Validation F1 Score", fontsize=12, fontweight="bold")
+        axes[2].grid(True, alpha=0.3)
+        axes[2].set_ylim([0, 1.05])
+        
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"📊 Saved training history graph to {output_path}")
