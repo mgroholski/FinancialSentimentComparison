@@ -30,16 +30,24 @@ def main(args):
     if not len(models):
         raise ValueError(f"Unknown pipeline type: {args.pipeline}")
 
-    train_end = len(dataset) * TRAIN_RATIO
-    val_end = train_end + len(dataset) * VAL_RATIO
-    train_df = dataset.iloc[:train_end].copy()
-    val_df = dataset.iloc[train_end:val_end].copy()
-    test_df = dataset.iloc[val_end:].copy()
+    n = len(dataset)
+
+    train_n = int(n * TRAIN_RATIO)
+    val_n = int(n * VAL_RATIO)
+
+    if train_n + val_n > n:
+        raise ValueError("TRAIN_RATIO + VAL_RATIO must be <= 1.0")
+
+    train_df = dataset.iloc[:train_n].copy()
+    val_df = dataset.iloc[train_n : train_n + val_n].copy()
+    test_df = dataset.iloc[train_n + val_n :].copy()
 
     for name, model in models:
+        print(f"Starting training for {name}.")
         model.train(train_df, val_df)
 
         for run in range(args.runs):
+            print(f"Starting prediction run {run} for {name}.")
             results = model.predict(test_df)
             evaluate(f"{name}-run{run + 1}", results)
 
