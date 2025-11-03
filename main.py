@@ -57,7 +57,7 @@ def parse_args():
 
     parser.add_argument(
         "-d",
-        "--data-path",
+        "--data",
         required=True,
         help="Path to the training data.",
     )

@@ -5,7 +5,7 @@ from sklearn.svm import LinearSVC
 from sentence_transformers import SentenceTransformer
 
 
-class SVMClassifier:
+class SVM:
     """
     Binary (0/1) text classifier using SentenceTransformer embeddings + LinearSVC.
     Expects dataframes with columns: 'Summary' (str), 'Truth' (0 or 1).
