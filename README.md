@@ -3,7 +3,7 @@
 Within the project we provide a pipeline to run financial sentiment analysis on four different machine learning methods: convolutional neural network, long short-term memory, random forest classifier, and support vector machine.
 
 ## Dataset
-We use data from the (FNSPID dataset)[https://github.com/Zdong104/FNSPID_Financial_News_Dataset]. We provide processed datasets used during our experimentation for the (full dataset)[https://drive.google.com/file/d/1UK-OwzI7j0ITMmF1IDKxxZPrneJP9x3m/view?usp=sharing] and a (fortune 500 subset)[https://drive.google.com/file/d/1tBKFjc_ilOJ3La_Kd9--UURZBTTvqfO0/view?usp=share_link].
+We use data from the [FNSPID dataset](https://github.com/Zdong104/FNSPID_Financial_News_Dataset). We provide processed datasets used during our experimentation for the [full dataset](https://drive.google.com/file/d/1UK-OwzI7j0ITMmF1IDKxxZPrneJP9x3m/view?usp=sharing) and a [fortune 500 subset](https://drive.google.com/file/d/1tBKFjc_ilOJ3La_Kd9--UURZBTTvqfO0/view?usp=share_link).
 
 ## Run
 1. Download dependencies with `pip3 install -r requirements.txt`.
