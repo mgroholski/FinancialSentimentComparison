@@ -13,14 +13,19 @@ from sentence_transformers import SentenceTransformer
 
 class LSTMModel(nn.Module):
     """
-    Bidirectional LSTM architecture for text classification on embeddings.
+    LSTM-based architecture for text classification on embeddings.
+    Treats the embedding as a single timestep with rich features.
     """
     def __init__(self, embedding_dim: int, hidden_dim: int = 128, num_layers: int = 2, dropout: float = 0.5):
         super(LSTMModel, self).__init__()
         
-        # Bidirectional LSTM layers
+        # Project embedding to a sequence of chunks for LSTM processing
+        self.chunk_size = 8  # Split embedding into chunks
+        self.num_chunks = embedding_dim // self.chunk_size
+        
+        # LSTM layers
         self.lstm = nn.LSTM(
-            input_size=1,
+            input_size=self.chunk_size,
             hidden_size=hidden_dim,
             num_layers=num_layers,
             batch_first=True,
@@ -38,8 +43,11 @@ class LSTMModel(nn.Module):
         
     def forward(self, x):
         # x shape: (batch_size, embedding_dim)
-        # Reshape for LSTM: (batch_size, embedding_dim, 1)
-        x = x.unsqueeze(2)
+        batch_size = x.size(0)
+        
+        # Reshape embedding into sequence of chunks
+        # (batch_size, num_chunks, chunk_size)
+        x = x.view(batch_size, self.num_chunks, self.chunk_size)
         
         # LSTM forward pass
         lstm_out, (h_n, c_n) = self.lstm(x)

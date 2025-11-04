@@ -14,7 +14,7 @@ class SVM:
     def __init__(self, model_name: str = "all-MiniLM-L6-v2", random_state: int = 42):
         self.encoder = SentenceTransformer(model_name)
         # LinearSVC is fast and works well on dense embeddings.
-        self.model = LinearSVC(random_state=random_state)
+        self.model = LinearSVC(random_state=random_state, dual="auto")
 
     @staticmethod
     def _ensure_binary(y: pd.Series) -> np.ndarray:
