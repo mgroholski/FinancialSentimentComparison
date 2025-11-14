@@ -13,5 +13,7 @@ We use data from the [FNSPID dataset](https://github.com/Zdong104/FNSPID_Financi
 
 ## Command Line Argument
 `-r` or `--runs`: An integer representing amount of repeats to test the data on a pipeline.
+
 `-d` or `--data`: The path to the data folder.
+
 `-p` or `--pipeline`: A string representing which model to use. Choices for the argument are: ["svm", "cnn", "lstm", "randomforest", "all"]
