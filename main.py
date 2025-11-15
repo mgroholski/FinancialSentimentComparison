@@ -1,10 +1,10 @@
 import argparse
 
-from svm.svm import SVM
-from randomforest.randomforest import RandomForest
 from cnn.cnn import CNN
+from data_integ import evaluate, load_data
 from lstm.lstm import LSTM
-from data_integ import load_data, evaluate
+from randomforest.randomforest import RandomForest
+from svm.svm import SVM
 
 TRAIN_RATIO = 0.7
 VAL_RATIO = 0.15
@@ -43,10 +43,10 @@ def main(args):
     test_df = dataset.iloc[train_n + val_n :].copy()
 
     for name, model in models:
-        print(f"Starting training for {name}.")
-        model.train(train_df, val_df)
-
         for run in range(args.runs):
+            print(f"Starting training run {run} for {name}.")
+            model.train(train_df, val_df)
+
             print(f"Starting prediction run {run} for {name}.")
             results = model.predict(test_df)
             evaluate(f"{name}-run{run + 1}", results)

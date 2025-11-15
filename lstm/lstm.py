@@ -1,17 +1,18 @@
-from typing import Optional
-import os
 import math
+import os
+import time
+from typing import Optional
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import TensorDataset, DataLoader
-from sklearn.metrics import precision_score, recall_score, f1_score
 from sentence_transformers import SentenceTransformer
+from sklearn.metrics import f1_score, precision_score, recall_score
+from torch.utils.data import DataLoader, TensorDataset
 
 
 class LSTMModel(nn.Module):
@@ -375,7 +376,7 @@ class LSTM:
         """
         output_dir = os.path.join("output", "lstm")
         os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, "training_history.png")
+        output_path = os.path.join(output_dir, f"training_history_{time.time()}.png")
 
         # Create figure with 4 subplots
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
