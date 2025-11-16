@@ -16,4 +16,4 @@ source activate tfenv
 
 cd /scratch/mgrohols/575/financial-sentiment
 
-python3 main.py -d ./data_utils/fortune_500 -p all -r 3
+python3 main.py -d ./data_utils/price_news_integrate -p lstm -r 3

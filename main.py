@@ -1,4 +1,7 @@
 import argparse
+import gc
+
+import torch
 
 from cnn.cnn import CNN
 from data_integ import evaluate, load_data
@@ -20,13 +23,13 @@ def main(args):
     models = []
     pipeline = args.pipeline
     if pipeline == "svm" or pipeline == "all":
-        models.append(("svm", SVM()))
+        models.append(("svm", SVM))
     if pipeline == "cnn" or pipeline == "all":
-        models.append(("cnn", CNN()))
+        models.append(("cnn", CNN))
     if pipeline == "lstm" or pipeline == "all":
-        models.append(("lstm", LSTM()))
+        models.append(("lstm", LSTM))
     if pipeline == "randomforest" or pipeline == "all":
-        models.append(("randomforest", RandomForest()))
+        models.append(("randomforest", RandomForest))
     if not len(models):
         raise ValueError(f"Unknown pipeline type: {args.pipeline}")
 
@@ -42,14 +45,20 @@ def main(args):
     val_df = dataset.iloc[train_n : train_n + val_n].copy()
     test_df = dataset.iloc[train_n + val_n :].copy()
 
-    for name, model in models:
+    for name, modelClass in models:
         for run in range(args.runs):
+            model = modelClass()
             print(f"Starting training run {run} for {name}.")
             model.train(train_df, val_df)
 
             print(f"Starting prediction run {run} for {name}.")
             results = model.predict(test_df)
             evaluate(f"{name}-run{run + 1}", results)
+
+            del model
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
 
 def parse_args():

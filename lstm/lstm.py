@@ -177,7 +177,7 @@ class LSTM:
         if self.device.type == "cuda":
             # BF16 supported on Ampere+; fall back to FP16 if needed by flipping flag
             dtype = torch.bfloat16 if self.use_bfloat16 else torch.float16
-            return torch.cuda.amp.autocast(dtype=dtype, enabled=True)
+            return torch.amp.autocast(device_type="cuda", dtype=dtype, enabled=True)
         else:
             from contextlib import nullcontext
 
